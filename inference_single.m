@@ -14,6 +14,7 @@ if ~exist(imageFile, 'file')
     error('Image %s not found.', imageFile);
 else
     rawImg = imread(imageFile);
+    rawImg_uint8 = rawImg;
     rawImg = im2single(rawImg);
 end
 
@@ -32,25 +33,37 @@ paramsMap = predict(net, dlInput);
 
 %% 4. Apply Enhancement Loop
 % The network outputs 24 channels (8 iterations * 3 channels)
-x = dlInput; 
 iterations = 8;
+x = apply_zerodce(dlInput, paramsMap, iterations);
 
-disp('Applying iterative curve enhancement...');
-for i = 1:iterations
-    % Extract alpha map for the current iteration
-    idx_start = (i-1)*3 + 1;
-    idx_end = i*3;
-    alpha_n = paramsMap(:, :, idx_start:idx_end, :);
-    
-    % Apply Zero-DCE curve equation
-    x = x + alpha_n .* (x .^ 2 - x);
-end
-
-%% 5. Post-Processing and Visualization
+%% 5. Post-Processing
 enhancedImg = extractdata(x);
 enhancedImg = min(max(enhancedImg, 0), 1);
+enhancedImg_uint8 = im2uint8(enhancedImg);
 
+%% 6. Quality Analysis (NIQE & PIQE)
+disp('Calculating Quality Metrics (Lower is Better)...');
+
+% Calculate NIQE
+score_niqe_input = niqe(rawImg_uint8);
+score_niqe_output = niqe(enhancedImg_uint8);
+
+% Calculate PIQE
+score_piqe_input = piqe(rawImg_uint8);
+score_piqe_output = piqe(enhancedImg_uint8);
+
+fprintf('\n--- Quality Report ---\n');
+fprintf('NIQE (Naturalness): Input = %.4f | Output = %.4f \n', score_niqe_input, score_niqe_output);
+fprintf('PIQE (Perception) : Input = %.4f | Output = %.4f \n', score_piqe_input, score_piqe_output);
+
+%% 7. Visualization
 figure('Name', 'Zero-DCE MATLAB Result');
-subplot(1,2,1); imshow(rawImg); title('Input');
-subplot(1,2,2); imshow(enhancedImg); title('Enhanced');
+subplot(1,2,1); 
+imshow(rawImg); 
+title(sprintf('Input\nNIQE: %.2f | PIQE: %.2f', score_niqe_input, score_piqe_input));
+
+subplot(1,2,2); 
+imshow(enhancedImg); 
+title(sprintf('Enhanced\nNIQE: %.2f | PIQE: %.2f', score_niqe_output, score_piqe_output));
+
 disp('Done.');
