@@ -1,0 +1,3 @@
+[submodule "ZeroDCEOriginal"]
+	path = ZeroDCEOriginal
+	url = https://github.com/Li-Chongyi/Zero-DCE

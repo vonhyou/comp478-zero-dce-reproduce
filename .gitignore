@@ -1,0 +1,18 @@
+# macOS
+.DS_Store
+._*
+
+# MATLAB
+*.asv
+*.mex*
+*.slxc
+*.prj
+codegen/
+slprj/
+
+# Editor/IDE
+.vscode/
+.idea/
+
+# Tooling
+.gemini/
