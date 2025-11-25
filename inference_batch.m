@@ -11,7 +11,6 @@ if ~exist(modelFile, 'file')
 end
 
 disp('Load ONNX model...');
-% We load the base network once
 netBase = importNetworkFromONNX(modelFile);
 
 % Initialize Report File
@@ -20,7 +19,6 @@ fprintf(fid, '# Zero-DCE Batch Report\n');
 fprintf(fid, 'Date: %s\n\n', datetime("now"));
 
 %% 2. Iterate Over Datasets
-% Find all items in input dir
 items = dir(inputRootDir);
 % Filter only real directories (exclude . and ..)
 subFolders = items([items.isdir] & ~strcmp({items.name},'.') & ~strcmp({items.name},'..'));
@@ -35,7 +33,7 @@ for k = 1:length(subFolders)
         mkdir(datasetOutDir);
     end
     
-    % Robustly find valid images
+    % Find valid images
     allItems = dir(fullfile(datasetInDir, '*'));
     fileNames = {allItems.name};
     isImage = false(size(allItems));
@@ -58,8 +56,10 @@ for k = 1:length(subFolders)
     % Stats accumulators
     stats.niqe_in = 0; stats.niqe_out = 0;
     stats.piqe_in = 0; stats.piqe_out = 0;
+    stats.proc_time = 0;
 
     %% 3. Process Images
+    hWait = waitbar(0, sprintf('Processing %s...', datasetName));
     for j = 1:numImages
         imgName = imgFiles(j).name;
         imageFile = fullfile(datasetInDir, imgName);
@@ -78,12 +78,17 @@ for k = 1:length(subFolders)
             
             % Initialize network (Must do per-image for dynamic sizes)
             net = initialize(netBase, dlInput);
+
+            t_img = tic;
             
             % Predict Curve Parameters
             paramsMap = predict(net, dlInput); 
             
             % Apply Enhancement Loop (Using Function)
             x = apply_zerodce(dlInput, paramsMap, iterations);
+
+            elapsed = toc(t_img);
+            stats.proc_time = stats.proc_time + elapsed;
             
             % Post-Processing
             enhancedImg = extractdata(x);
@@ -103,7 +108,11 @@ for k = 1:length(subFolders)
             fprintf('\n'); 
             warning('Failed to process %s: %s', imgName, ME.message);
         end
+
+        waitbar(j/numImages, hWait);
     end
+
+    close(hWait);
     
     %% 4. Append to Report
     if numImages > 0
@@ -111,9 +120,11 @@ for k = 1:length(subFolders)
         avg_niqe_out = stats.niqe_out / numImages;
         avg_piqe_in = stats.piqe_in / numImages;
         avg_piqe_out = stats.piqe_out / numImages;
+        avg_time = stats.proc_time / numImages;
         
         fprintf(fid, '## Dataset: %s\n', datasetName);
         fprintf(fid, '> number of images: %d\n\n', numImages);
+        fprintf(fid, '> average inference time: %.4f seconds/image\n\n', avg_time);
         fprintf(fid, '| Metric | Original (Avg) | Enhanced (Avg) |\n');
         fprintf(fid, '| :--- | :---: | :---: |\n');
         fprintf(fid, '| **NIQE** | %.4f | %.4f |\n', avg_niqe_in, avg_niqe_out);
