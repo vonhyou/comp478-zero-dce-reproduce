@@ -1,0 +1,239 @@
+# Zero-DCE MATLAB Implementation
+
+[![MATLAB](https://img.shields.io/badge/MATLAB-R2023a+-orange.svg)](https://www.mathworks.com/products/matlab.html)
+[![License: CC BY-NC 4.0](https://img.shields.io/badge/License-CC%20BY--NC%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by-nc/4.0/)
+
+A MATLAB implementation of **Zero-Reference Deep Curve Estimation for Low-Light Image Enhancement (Zero-DCE)**, based on the original PyTorch implementation. This project reproduces the inference pipeline and extends it with image quality assessment metrics.
+
+## About Zero-DCE
+
+Zero-DCE is a pioneering low-light image enhancement method that formulates light enhancement as a task of image-specific curve estimation. Unlike traditional methods that require paired or unpaired training data with reference images, Zero-DCE is trained with **zero-reference**, meaning it doesn't need well-lit reference images during training.
+
+### Key Innovations
+
+1. **Light-Enhancement Curve (LE-curve)**: Defines a pixel-wise and high-order curve that can map a low-light image to its enhanced version. The curve is:
+   - Differentiable for end-to-end training
+   - Monotonic to preserve pixel intensity order
+   - Constrained to the valid range [0, 1]
+
+2. **Zero-Reference Loss Functions**: A set of differentiable non-reference loss functions enabling training without any ground truth:
+   - **Spatial Consistency Loss**: Preserves spatial coherence between original and enhanced images
+   - **Exposure Control Loss**: Maintains well-lit exposure levels
+   - **Color Constancy Loss**: Prevents color deviation during enhancement  
+   - **Illumination Smoothness Loss**: Ensures smooth light curves in neighboring regions
+
+3. **DCE-Net Architecture**: A lightweight convolutional neural network that estimates pixel-wise curve parameters:
+   - 7 convolutional layers with 32 filters (3×3 kernels)
+   - Symmetric skip connections between encoder and decoder
+   - No pooling layers, preserving spatial resolution
+   - Outputs 24 channels (8 iterations × 3 RGB channels)
+
+### Enhancement Formula
+
+The Light-Enhancement curve is iteratively applied as:
+
+```
+LE(x) = x + α * (x² - x)
+```
+
+where:
+- `x` is the input pixel value
+- `α` (alpha) is the learned curve parameter
+- This formula is applied 8 times with different α values for each RGB channel
+
+## Repository Structure
+
+```
+comp478-zero-dce-reproduce/
+├── +ZeroDCE/                    # MATLAB package with custom layers for ONNX import
+│   ├── +coder/                  # Code generation support
+│   ├── +ops/                    # Operations (permute, convolution args)
+│   └── ConvLayer*.m             # Custom convolution layers
+├── models/
+│   └── ZeroDCE.onnx             # Pre-trained ONNX model
+├── images/
+│   └── input/                   # Test datasets
+│       ├── DICM/                # DICM dataset
+│       ├── LIME/                # LIME dataset
+│       ├── LOL/                 # Low-Light (LOL) dataset
+│       └── MYOWN/               # Custom test images
+├── ZeroDCEOriginal/             # Git submodule - original PyTorch implementation
+├── inference_single.m           # Single image inference script
+├── inference_batch.m            # Batch inference with metrics
+├── apply_zerodce.m              # Core enhancement function
+├── convert_onnx.py              # PyTorch to ONNX conversion script
+├── Report.md                    # Batch processing results
+└── README.md                    # This file
+```
+
+## Prerequisites
+
+### MATLAB Requirements
+- **MATLAB R2023a** or later
+- **Deep Learning Toolbox**
+- **Image Processing Toolbox** (for NIQE/PIQE metrics)
+
+### For Model Conversion (Optional)
+If you want to regenerate the ONNX model from the original PyTorch weights:
+- Python 3.7+
+- PyTorch 1.0+
+- ONNX
+
+## Installation
+
+1. **Clone the repository with submodules:**
+   ```bash
+   git clone --recursive https://github.com/vonhyou/comp478-zero-dce-reproduce.git
+   cd comp478-zero-dce-reproduce
+   ```
+
+   Or if already cloned without submodules:
+   ```bash
+   git submodule update --init --recursive
+   ```
+
+2. **Verify the ONNX model exists:**
+   ```bash
+   ls models/ZeroDCE.onnx
+   ```
+
+## Usage
+
+### Single Image Enhancement
+
+Edit `inference_single.m` to specify your input image path, then run:
+
+```matlab
+inference_single
+```
+
+This script will:
+1. Load the ONNX model
+2. Process the specified image
+3. Calculate NIQE and PIQE quality metrics
+4. Display a side-by-side comparison
+
+### Batch Processing
+
+Place your test images in subdirectories under `images/input/`, then run:
+
+```matlab
+inference_batch
+```
+
+This script will:
+1. Process all images in each subdirectory
+2. Save enhanced images to `images/output/`
+3. Generate `Report.md` with quality metrics for each dataset
+
+### Custom Integration
+
+You can use the `apply_zerodce` function directly:
+
+```matlab
+% Load model
+net = importNetworkFromONNX('models/ZeroDCE.onnx');
+
+% Prepare input (H x W x C -> dlarray with format SSCB)
+img = im2single(imread('your_image.jpg'));
+dlInput = dlarray(img, 'SSCB');
+if ndims(dlInput) < 4
+    dlInput = expanddims(dlInput, 4);  % Add batch dimension
+end
+
+% Initialize and predict
+net = initialize(net, dlInput);
+paramsMap = predict(net, dlInput);
+
+% Apply enhancement (8 iterations)
+enhanced = apply_zerodce(dlInput, paramsMap, 8);
+
+% Convert back to image
+enhanced = extractdata(enhanced);
+enhanced = min(max(enhanced, 0), 1);
+```
+
+## Evaluation Results
+
+The following results were obtained on standard low-light benchmarks:
+
+| Dataset | Images | Avg Time (s/img) | NIQE (Orig) | NIQE (Enh) | PIQE (Orig) | PIQE (Enh) |
+|---------|--------|------------------|-------------|------------|-------------|------------|
+| DICM    | 64     | 0.24             | 3.29        | 3.44       | 35.47       | 36.93      |
+| LIME    | 10     | 0.67             | 3.57        | 3.79       | 32.97       | 35.87      |
+| LOL     | 485    | 0.16             | 6.04        | 8.55       | 18.87       | 37.75      |
+
+**Note**: NIQE and PIQE are blind/no-reference quality metrics where **lower scores indicate better quality**. The metrics measure naturalness and perceptual quality, which may not fully capture enhancement improvements for extremely dark images.
+
+## Technical Details
+
+### Model Architecture
+
+The DCE-Net architecture consists of:
+
+| Layer     | Input Channels | Output Channels | Kernel | Activation |
+|-----------|----------------|-----------------|--------|------------|
+| e_conv1   | 3              | 32              | 3×3    | ReLU       |
+| e_conv2   | 32             | 32              | 3×3    | ReLU       |
+| e_conv3   | 32             | 32              | 3×3    | ReLU       |
+| e_conv4   | 32             | 32              | 3×3    | ReLU       |
+| e_conv5   | 64 (concat)    | 32              | 3×3    | ReLU       |
+| e_conv6   | 64 (concat)    | 32              | 3×3    | ReLU       |
+| e_conv7   | 64 (concat)    | 24              | 3×3    | Tanh       |
+
+Skip connections: `x3→e_conv5`, `x2→e_conv6`, `x1→e_conv7`
+
+### ONNX Conversion
+
+The `convert_onnx.py` script exports the PyTorch model to ONNX format:
+- Uses ONNX opset version 13
+- Sets IR version to 9 for MATLAB compatibility
+- Supports dynamic input sizes
+
+To regenerate the ONNX model:
+```bash
+cd ZeroDCEOriginal/Zero-DCE_code
+python ../../convert_onnx.py
+mv ZeroDCE.onnx ../../models/
+```
+
+## Citation
+
+If you use this implementation, please cite the original Zero-DCE paper:
+
+```bibtex
+@inproceedings{Zero-DCE,
+  author    = {Guo, Chunle Guo and Li, Chongyi and Guo, Jichang and Loy, Chen Change and Hou, Junhui and Kwong, Sam and Cong, Runmin},
+  title     = {Zero-reference deep curve estimation for low-light image enhancement},
+  booktitle = {Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR)},
+  pages     = {1780-1789},
+  month     = {June},
+  year      = {2020}
+}
+```
+
+**Paper Links:**
+- [arXiv](https://arxiv.org/abs/2001.06826)
+- [CVPR 2020 Open Access](http://openaccess.thecvf.com/content_CVPR_2020/papers/Guo_Zero-Reference_Deep_Curve_Estimation_for_Low-Light_Image_Enhancement_CVPR_2020_paper.pdf)
+- [Project Page](https://li-chongyi.github.io/Proj_Zero-DCE.html)
+
+## License
+
+This implementation follows the original Zero-DCE licensing:
+
+**The implementation is for non-commercial, academic research purposes only.**
+
+Licensed under [Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)](https://creativecommons.org/licenses/by-nc/4.0/)
+
+## Acknowledgements
+
+- [Original Zero-DCE PyTorch Implementation](https://github.com/Li-Chongyi/Zero-DCE) by Li Chongyi et al.
+- MathWorks for ONNX import support in MATLAB Deep Learning Toolbox
+
+## Contact
+
+For questions about this MATLAB implementation, please open an issue on this repository.
+
+For questions about the Zero-DCE method, please contact the original authors:
+- Chongyi Li: lichongyi25@gmail.com
+- Chunle Guo: guochunle@tju.edu.cn
