@@ -26,6 +26,7 @@ comp478-zero-dce-reproduce/
 ├── apply_zerodce.m              # Core enhancement function
 ├── convert_onnx.py              # PyTorch to ONNX conversion script
 ├── Report.md                    # Batch processing results
+├── final_report.pdf             # Final report for submission
 └── README.md
 ```
 
@@ -156,6 +157,12 @@ enhanced = apply_zerodce(dlInput, paramsMap, 8);
 enhanced = extractdata(enhanced);
 enhanced = min(max(enhanced, 0), 1);
 ```
+
+## Project Report
+
+A detailed report on the reproduction and extended evaluation of Zero-DCE can be found here:
+
+- [Final Report (PDF)](final_report.pdf)
 
 ## Evaluation Results
 
